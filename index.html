@@ -164,7 +164,7 @@
 
 <script>
 // Tích hợp đường dẫn Google Apps Script Web App của bạn
-const GOOGLE_SHEET_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyLG0ZI1pu62bjjyCOSqHIGq_dEuY_JuapggWcCOK4_k_3XYOjXOFT0Ape4kqLOzMwfOw/exec";
+const GOOGLE_SHEET_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyTX1OS6uRk3qNMoTZdFmP-st4CuB9Spbfv2OFmTj3PxE2vrlofTjH3vtAwZBfOCKHtkw/exec";
 
 // Hàm gửi thông tin cô đọng khi có thay đổi
 function syncToGoogleSheet(deptId, panelCode, statusDesc) {
@@ -332,26 +332,30 @@ function defaultState(){
   return s;
 }
 
-function loadState(){
+// Hàm tải dữ liệu từ Google Sheet khi mở trang web
+async function loadState(){
+  try {
+    if (GOOGLE_SHEET_WEB_APP_URL.startsWith("http")) {
+      const response = await fetch(GOOGLE_SHEET_WEB_APP_URL);
+      const cloudData = await response.json();
+      
+      // Nếu trên Google Sheet đã có dữ liệu lưu trữ
+      if (cloudData && cloudData.elevations) {
+        state = cloudData;
+        localStorage.setItem(STORE_KEY, JSON.stringify(state)); // Lưu tạm vào máy
+        render();
+        return;
+      }
+    }
+  } catch (err) {
+    console.log("Không tải được từ Cloud, dùng dữ liệu dưới máy:", err);
+  }
+
+  // Fallback: Nếu chưa có trên mạng thì dùng dữ liệu dưới máy hoặc mặc định
   try{
     const savedData = localStorage.getItem(STORE_KEY);
     if(savedData){
       state = JSON.parse(savedData);
-      ELEVATIONS.forEach(el=>{
-        if(!state.elevations[el.id]){
-          state.elevations[el.id] = { panels: el.panels.map(p=>freshPanel(p.code,p.qty,p.w||0,p.h||0)) };
-        }
-      });
-      // Đảm bảo các state cũ (chưa có subItems) vẫn hoạt động bình thường
-      Object.keys(state.elevations).forEach(elId=>{
-        state.elevations[elId].panels.forEach(p=>{
-          DEPARTMENTS.forEach(d=>{
-            if(!p.stages[d.id]) p.stages[d.id] = {status:0, note:"", qtyDone:0, subItems:[]};
-            if(!p.stages[d.id].subItems) p.stages[d.id].subItems = [];
-          });
-        });
-      });
-      state.tasks.forEach(t=>{ if(t.statusText === undefined) t.statusText = ""; });
     } else {
       state = defaultState();
       saveState();
@@ -362,14 +366,29 @@ function loadState(){
   render();
 }
 
+// Hàm đẩy toàn bộ trạng thái lên Google Sheet khi có thay đổi
 function saveState(){
-  try{ 
+  try { 
     localStorage.setItem(STORE_KEY, JSON.stringify(state)); 
-    syncToGoogleSheet(); // Tự động gửi về Google Sheet khi có thay đổi
-  }catch(e){}
-}
+    
+    if (GOOGLE_SHEET_WEB_APP_URL.startsWith("http")) {
+      const payload = {
+        dept: mainView,
+        code: "SYNC_ALL",
+        fullState: state // Gửi nguyên cục dữ liệu trạng thái lên mây
+      };
 
-function elProgress(deptId, elId){
+      fetch(GOOGLE_SHEET_WEB_APP_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }).catch(err => {
+        console.error("Lỗi đồng bộ Google Sheet:", err);
+      });
+    }
+  }catch(e){}
+}function elProgress(deptId, elId){
   const panels = state.elevations[elId]?.panels || [];
   if(panels.length===0) return 0;
   let total = 0, done = 0;
